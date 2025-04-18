@@ -1,0 +1,25 @@
+{
+    "id": "329af889-3ba4-4044-827d-106ccf51f169",
+    "generation_type": "image",
+    "state": "completed",
+    "failure_reason": null,
+    "created_at": "2025-04-16T19:18:27.945000Z",
+    "assets": {
+        "video": null,
+        "image": "https://storage.cdn-luma.com/dream_machine/873b786e-155b-4f46-9f1b-45b42528ec9f/8fbc8afd-9483-4ba0-84f3-6fb8261c357d_result28b2e866eafe4dbe.jpg",
+        "progress_video": null
+    },
+    "model": "photon-1",
+    "request": {
+        "generation_type": "image",
+        "model": "photon-1",
+        "prompt": "A teddy bear in sunglasses playing electric guitar and dancing, facing the camera and posing in the style of a social media profile photo",
+        "aspect_ratio": "16:9",
+        "callback_url": null,
+        "image_ref": null,
+        "style_ref": null,
+        "character_ref": null,
+        "modify_image_ref": null,
+        "sync": false
+    }
+}

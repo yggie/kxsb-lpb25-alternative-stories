@@ -1,0 +1,17 @@
+[project]
+dependencies = [
+  "alembic>=1.15.2",
+  "langchain-mistralai>=0.2.10",
+  "langchain-ollama>=0.3.1",
+  "lumaai>=1.7.3",
+  "psycopg2-binary>=2.9.10",
+  "python-dotenv>=1.1.0",
+  "sqlalchemy>=2.0.40",
+  "strawberry-graphql[fastapi]>=0.263.2",
+  "websockets>=15.0.1",
+]
+description = "Add your description here"
+name = "backend"
+readme = "README.md"
+requires-python = ">=3.13"
+version = "0.1.0"

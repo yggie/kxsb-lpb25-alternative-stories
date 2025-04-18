@@ -1,0 +1,21 @@
+{
+    "id": "329af889-3ba4-4044-827d-106ccf51f169",
+    "generation_type": "image",
+    "state": "queued",
+    "failure_reason": null,
+    "created_at": "2025-04-16T19:18:27.945231Z",
+    "assets": null,
+    "model": "photon-1",
+    "request": {
+        "generation_type": "image",
+        "model": "photon-1",
+        "prompt": "A teddy bear in sunglasses playing electric guitar and dancing, facing the camera and posing in the style of a social media profile photo",
+        "aspect_ratio": "16:9",
+        "callback_url": null,
+        "image_ref": null,
+        "style_ref": null,
+        "character_ref": null,
+        "modify_image_ref": null,
+        "sync": false
+    }
+}
