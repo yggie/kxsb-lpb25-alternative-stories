@@ -1,0 +1,142 @@
+.button {
+  @apply relative border-none;
+
+  color: transparent;
+  background: linear-gradient(120deg, #00f260, #0575e6, #00f260);
+  background-repeat: no-repeat;
+  background-size: 200% 200%;
+  background-position: 100% 100%;
+  -webkit-background-clip: text;
+  animation: gradient-animation 4s ease-in-out infinite;
+}
+
+.button:after,
+.button:before {
+  content: "";
+  position: absolute;
+  border-radius: 4px;
+  background: linear-gradient(120deg, #00f260, #0575e6, #00f260);
+  background-size: 300% 300%;
+}
+
+.button:before {
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  clip-path: polygon(
+    0% 100%,
+    3px 100%,
+    3px 3px,
+    calc(100% - 3px) 3px,
+    calc(100% - 3px) calc(100% - 3px),
+    3px calc(100% - 3px),
+    3px 100%,
+    100% 100%,
+    100% 0%,
+    0% 0%
+  );
+  animation: frame-enter 1s forwards ease-in-out reverse,
+    gradient-animation 4s ease-in-out infinite;
+}
+
+.button:after {
+  filter: blur(20px);
+  opacity: 0.5;
+  top: -2px;
+  left: -2px;
+  width: calc(100% + 4px);
+  height: calc(100% + 4px);
+  animation: gradient-animation 4s ease-in-out infinite;
+}
+
+@keyframes gradient-animation {
+  0% {
+    background-position: 15% 0%;
+  }
+
+  50% {
+    background-position: 85% 100%;
+  }
+
+  100% {
+    background-position: 15% 0%;
+  }
+}
+
+@keyframes frame-enter {
+  0% {
+    clip-path: polygon(
+      0% 100%,
+      3px 100%,
+      3px 3px,
+      calc(100% - 3px) 3px,
+      calc(100% - 3px) calc(100% - 3px),
+      3px calc(100% - 3px),
+      3px 100%,
+      100% 100%,
+      100% 0%,
+      0% 0%
+    );
+  }
+
+  25% {
+    clip-path: polygon(
+      0% 100%,
+      3px 100%,
+      3px 3px,
+      calc(100% - 3px) 3px,
+      calc(100% - 3px) calc(100% - 3px),
+      calc(100% - 3px) calc(100% - 3px),
+      calc(100% - 3px) 100%,
+      100% 100%,
+      100% 0%,
+      0% 0%
+    );
+  }
+
+  50% {
+    clip-path: polygon(
+      0% 100%,
+      3px 100%,
+      3px 3px,
+      calc(100% - 3px) 3px,
+      calc(100% - 3px) 3px,
+      calc(100% - 3px) 3px,
+      calc(100% - 3px) 3px,
+      calc(100% - 3px) 3px,
+      100% 0%,
+      0% 0%
+    );
+  }
+
+  75% {
+    -webkit-clip-path: polygon(
+      0% 100%,
+      3px 100%,
+      3px 3px,
+      3px 3px,
+      3px 3px,
+      3px 3px,
+      3px 3px,
+      3px 3px,
+      3px 0%,
+      0% 0%
+    );
+  }
+
+  100% {
+    -webkit-clip-path: polygon(
+      0% 100%,
+      3px 100%,
+      3px 100%,
+      3px 100%,
+      3px 100%,
+      3px 100%,
+      3px 100%,
+      3px 100%,
+      3px 100%,
+      0% 100%
+    );
+  }
+}

@@ -1,9 +1,9 @@
 import uuid
 import json
+import random
 import asyncio
 import sqlalchemy
 import sqlalchemy.orm
-import sqlalchemy.engine
 import app.models
 from urllib.parse import quote
 from app.gamemaster.llms import GAMEMASTER_BASE_CHARACTER
@@ -12,87 +12,49 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_mistralai import ChatMistralAI
 from app.config import Config
 from app.luma import luma_client
+from app.gamemaster.llms import llm as fast_llm
+from app.gamemaster.utils import clean_and_parse_json
+from app.database import connection as conn
 
 llm = ChatMistralAI(
     model_name="mistral-large-latest",
-    temperature=0.8,
+    temperature=0.3,
     api_key=Config.mistral_api_key,
 )
-
-
-def clean_and_parse_json(llm_response: str) -> dict:
-    lines = llm_response.splitlines()
-    if lines[0].startswith("`"):
-        lines = lines[1:]
-    if lines[-1].startswith("`"):
-        lines = lines[:-1]
-    print("TEST")
-    print("\n".join(lines))
-    print("TEST")
-    return json.loads("\n".join(lines))
-
-
-engine = sqlalchemy.create_engine(
-    sqlalchemy.engine.URL(
-        drivername="postgresql",
-        username="postgres",
-        password="example",
-        port=5432,
-        host="localhost",
-        database="postgres",
-        query={},
-    )
-)
-conn = engine.connect()
 
 session_key = uuid.uuid4()
 
 d: dict
 if Config.stub_text_generation:
-    with open("./example_gen.json", "r") as file:
+    with open("./tests/example_gen.json", "r") as file:
         d = json.load(file)
 else:
     prompt = ChatPromptTemplate.from_messages(
         [
-            SystemMessage(
-                content="""
+            (
+                "system",
+                """
 {base_character}
 
-You will be provided reference material for the project, which you must base
-your story on. Based on this brief, write a detailed
-design document for the background of the immersive story. Include details of the
-genre of the story, expand on the chosen background and world setting.
+You will be provided with text that will serve as the reference material for your next story. This material will have historical and cultural significance.
 
-For the world setting, while drawing inspiration from the reference material,
-mix it with popular fictional genres, from either Fantasy, Steampunk, Medieval,
-Futuristic, Dystopian or Espionage.
+Your story should centre around a main character. Give details of this main character, including a detailed breakdown of their personality and background. The short story should revolve around the main character, illustrating a particularly challenging day in their day-to-day routine in the context of the story setting. Also, introduce a small cast of supporting characters (maximum of 2) who appears in the story.
 
-Be sure to include details of the locations present in the world that would be important
-to the story, whether real or fantasy. Also for the purpose of the story, include
-a detailed set of characters who will be a part of the story and a brief
-overview of the scenario that will be played out during the experience.
+In addition to the synopsis for the main story, also write two detailed synopsis for different sections of the story. Adhering to the three-act story framework, write details of the setup and confrontation acts only. Rely heavily on the reference material and the background of the main character while writing these acts, while also injecting a little bit of fantasy to make the story interesting.
 
-Be sure to make every character unique and have their own personality. We want
-a diverse cast that represents every popular character archetype in the
-fictional universe. Since this is a text driven story, be sure to include
-information about how each character might converse in text, including any
-quirks in their behaviour, slangs or mannerisms that they might adopt. Include
-these descriptions as part of their personality.
+Finally, include a short prologue built from the synopsis to introduce your story. The prologue should be broken into multiple short lines, fed to the player one at a time, similar to movie openings.
 
-Also include multiple options for possible endings which has at least one good
-ending, one bad ending and then some options in between. For each ending, give a
-rough explanation of the types of choices that would lead players to this
-ending. Also include a secret ending, which will be difficult to unlock.
+Remember to base your story around the reference material provided. Also extract the key historical and cultural details from this reference material and highlight them in your response.
 
-In your response, include only the full brief in JSON and no other commentary.
-Use the following structure:
+Your response should only include the content in JSON. The structure of the response should follow this example:
 
 ```
-{{ "title": "Title of the experience", "genres": ["history", "mystery", "fantasy", "steampunk"], "tone": "detailed explanation of the tone", "world_setting": "detailed explanation of the world setting", "characters": [{{ "name": "Marcus", "personality": "detailed personality", "background": "detailed background" }}], "scenario_overview": "detailed overall storyline", "possible_endings": [{{} "name": "Ending 1", "text": "And they lived happily ever after", "detail": "detail and criteria for ending 1" }}, {{ "name": "Ending 2", "text": "Fate would never let them be together", "detail": "detail and criteria of ending 2" }}] }}
+{{ "title": "Act 1", "reference_material_summary": "A summary of the original reference material provided", "synopsis": "A short synopsis introducing the world", "themes": ["nature", "culture", "history"], "main_character": {{ "name": "Mr John Doe", "personality": "A quiet businessman", "background": "Mr John Doe’s detailed background" }}, "supporting_characters": [{{ "name": "Dr Watson", "personality": "Dr Watson’s personality in detail", "background": "Dr Watson’s background" }}, {{ "name": "Mrs Demure", "personality": "Friendly old lady", "background": "Owner and head chef of the neighbourhood bakery" }}], "setup_act": "detailed synopsis of the first act", "confrontation_act": "detailed synopsis of the second act", "prologue": ["Once upon a time…", "In a land far far away…"] }}
 ```
-    """
+```
+    """,
             ),
-            HumanMessage(content="# Reference Material\n\n{reference_material}"),
+            ("human", "{reference_material}"),
         ]
     )
 
@@ -124,86 +86,188 @@ characters: list[dict] = list(
         | {
             "id": 1 + x[0],
             "profile_image_url": f"https://placehold.co/400?text={quote(x[1]["name"])}",
+            "is_main_character": False,
         },
-        enumerate(d["characters"]),
+        enumerate(d["supporting_characters"]),
     )
 )
 
-if not Config.stub_image_generation:
+characters.append(
+    d["main_character"]
+    | {
+        "id": 0,
+        "profile_image_url": f"https://placehold.co/400?text={quote(d["main_character"]["name"])}",
+        "is_main_character": True,
+    }
+)
 
-    async def gen_character_profile_image(char: dict) -> str:
-        print("start char gen for", char["name"])
-        generation = await luma_client.generations.image.create(
+game_session = app.models.GameSession()
+game_session.visual_style = random.choice(
+    [
+        # "hyper-realism",
+        "comics, halftone",
+        "egyptian, mythology, greek",
+        "animation, cartoon",
+        "cgi, mysterious",
+    ]
+)
+game_session.id = session_key
+game_session.title = d["title"]
+game_session.themes = d["themes"]
+game_session.synopsis = d["synopsis"]
+game_session.opening_video_url = "http://localhost:3000/videos/test.mp4"
+game_session.opening_act_synopsis = d["setup_act"]
+game_session.middle_act_synopsis = d["confrontation_act"]
+game_session.prologue = d["prologue"]
+game_session.promo_image_url = (
+    f"https://placehold.co/600x400?text={quote("Promo Image")}"
+)
+game_session.total_actions = 8
+game_session.remaining_actions = game_session.total_actions
+game_session.reference_material_summary = d["reference_material_summary"]
+
+# if not Config.stub_image_generation:
+
+#     async def gen_character_profile_image(char: dict) -> str:
+#         print("start char gen for", char["name"])
+#         generation = await luma_client.generations.image.create(
+#             prompt=f"""
+# Create a social media profile picture of a character facing the camera.
+
+# The image should have the following themes: {", ".join(d["themes"])}
+
+# Use the following styles: {game_session.visual_style}
+
+# The character has the following description:
+
+# ## Background
+# {char["background"]}
+
+# ## Personality
+# {char["personality"]}
+#             """,
+#             aspect_ratio="1:1",
+#         )
+
+#         completed = False
+#         while not completed:
+#             print("checking: ", char["name"])
+#             gen = await luma_client.generations.get(id=generation.id)
+#             if gen.state == "completed":
+#                 print("IMAGE READY: ", char["name"])
+#                 return gen.assets.image
+#             elif gen.state == "failed":
+#                 raise RuntimeError(f"Generation failed: {gen.failure_reason}")
+
+#             await asyncio.sleep(3)
+#         pass
+
+#     async def gen_characters_image(chars: list[dict]) -> list[str]:
+#         jobs = [gen_character_profile_image(char) for char in chars]
+#         return await asyncio.gather(*jobs)
+
+#     images = asyncio.run(gen_characters_image(characters))
+
+#     for i, char in enumerate(characters):
+#         char["profile_image_url"] = images[i]
+
+if not Config.stub_video_generation:
+
+    async def gen_video() -> tuple[str, str]:
+        simple_chain = (
+            ChatPromptTemplate.from_messages(
+                [
+                    (
+                        "system",
+                        """
+{base_character}
+
+You will be provided with a synopsis for a short story, along with the reference
+material that influences the story. Use the synopsis to generate a video, and
+use the reference material to generate the video background, mood and setting.
+
+From this information, describe a video scene that would be suitable as a
+trailer for the short story in detail, going into detail on how the scene is
+laid out, who is in the foreground and the camera movements or scene
+transitions.
+
+Keep this description succinct and no longer than 1 paragraph.
+""",
+                    ),
+                    (
+                        "human",
+                        """
+## Synopsis
+{synopsis}
+
+## Reference material
+{reference_material}
+""",
+                    ),
+                ]
+            )
+            | fast_llm
+        )
+
+        response = await simple_chain.ainvoke(
+            {
+                "base_character": "You are a helpful video director",
+                "synopsis": game_session.synopsis,
+                "reference_material": game_session.reference_material_summary,
+            }
+        )
+
+        print("start video gen")
+        generation = await luma_client.generations.create(
+            model="ray-2",
             prompt=f"""
-Create a hyper-realistic social media profile picture of a character facing the camera.
+Using the following visual styles: {game_session.visual_style}
 
-The image should have the following themes: {", ".join(d["genres"])}
-
-The character has the following description:
-
-## Background
-{char["background"]}
-
-## Personality
-{char["personality"]}
-            """,
-            aspect_ratio="1:1",
+Generate a video using the following description:
+{response.content}
+""",
+            loop=True,
         )
 
         completed = False
         while not completed:
-            print("checking: ", char["name"])
+            print("checking video")
             gen = await luma_client.generations.get(id=generation.id)
             if gen.state == "completed":
-                print("IMAGE READY: ", char["name"])
-                return gen.assets.image
+                print("end video gen")
+                return (gen.assets.video, gen.assets.image)
             elif gen.state == "failed":
                 raise RuntimeError(f"Generation failed: {gen.failure_reason}")
 
             await asyncio.sleep(3)
         pass
 
-    async def gen_characters_image(chars: list[dict]) -> list[str]:
-        jobs = [gen_character_profile_image(char) for char in chars]
-        return await asyncio.gather(*jobs)
+    (video_url, image_url) = asyncio.run(gen_video())
+    game_session.opening_video_url = video_url
+    game_session.promo_image_url = image_url
 
-    images = asyncio.run(gen_characters_image(characters))
-
-    for i, char in enumerate(characters):
-        char["profile_image_url"] = images[i]
-
-game_session = app.models.GameSession()
-game_session.id = session_key
-game_session.title = d["title"]
-game_session.genres = d["genres"]
-game_session.tone = d["tone"]
-game_session.choices = []
-game_session.current_event_index = 0
-game_session.world_setting = d["world_setting"]
-game_session.raw_events = "[]"
 game_session.raw_characters = json.dumps(characters)
-game_session.scenario_overview = d["scenario_overview"]
-game_session.raw_possible_endings = json.dumps(d["possible_endings"])
 
 brief = f"""
 # {game_session.title}
 
-## Genres
-{', '.join(game_session.genres)}
+## Reference
+{game_session.reference_material_summary}
 
-## Tone
-{game_session.tone}
+## Themes
+{", ".join(game_session.themes)}
 
-## World Setting
-{game_session.world_setting}
+## Synopsis
+{game_session.synopsis}
+
+### Act 1
+{game_session.opening_act_synopsis}
+
+### Act 2
+{game_session.middle_act_synopsis}
 
 ## Characters
 {"\n\n".join(list(map(lambda c: f"Name: {c.name}\nPersonality: {c.personality}\nBackground: {c.background}\n", game_session.characters)))}
-
-## Scenario Overview
-{game_session.scenario_overview}
-
-{"\n\n".join(list(map(lambda e: f"Name: {e.name}\nText: {e.text}\nDetail:\n```\n{e.detail}\n```", game_session.possible_endings)))}
 """
 
 print(brief)
@@ -211,5 +275,4 @@ print(brief)
 with sqlalchemy.orm.Session(conn) as session:
     session.add_all([game_session])
     session.commit()
-
     print("CREATED", game_session.id)

@@ -3,9 +3,12 @@
 import { FullPageLoader } from "@/ui/progress/loader";
 import { useQuery } from "@apollo/client";
 import { gql } from "@generated/gql";
+import { notFound } from "next/navigation";
 import Markdown from "react-markdown";
 
 export default function DebugPage() {
+  if (!process.env.NEXT_PUBLIC_DEBUG) notFound();
+
   const debugQuery = useQuery(
     gql(`
     query DebugQuery {

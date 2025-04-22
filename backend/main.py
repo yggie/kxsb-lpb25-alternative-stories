@@ -1,77 +1,64 @@
+import time
 import asyncio
 import typing
 import strawberry
 import sqlalchemy
 import app.models as appmodels
 from enum import Enum
+from urllib.parse import quote
+from app.config import Config
 from fastapi import FastAPI, WebSocket
+from app.gamemaster.llms import llm
+from langchain_core.prompts import ChatPromptTemplate
 from fastapi.middleware.cors import CORSMiddleware
 from strawberry.fastapi import GraphQLRouter
 from sqlalchemy.orm import Session
-from app.models import connection
+from app.database import connection
 from app.logging import logger
-from app.gamemaster.generate_game_story_act import generate_game_story_act
+from app.gamemaster.generate_next_story_block import (
+    generate_next_story_block,
+    TextAction,
+    PhotoAction,
+)
+
 from app.luma import luma_client
 import lumaai.types
 
 
 @strawberry.type
-class SubmitPhotoEvent:
-    photo_url: str
+class GameStoryBlock:
+    id: int
+    number: int
+    is_final_act: bool
+    dialogue: typing.List[str]
+    previous_action: typing.Optional[str]
+    backdrop_image_url: typing.Optional[str]
+    possible_actions: typing.List[str]
+    actions_consumed: int
 
+    @staticmethod
+    def from_data(block: appmodels.GameStoryBlock):
+        previous_action = block.previous_action
+        if previous_action == "":
+            previous_action = None
 
-@strawberry.type
-class ShowStoryPrologueEvent:
-    lines: typing.List[str]
-
-
-@strawberry.type
-class ShowVideoEvent:
-    video_url: str
-
-
-@strawberry.type
-class WritingNewStoryActEvent:
-    status: bool
-
-
-@strawberry.type
-class NewStoryActEvent:
-    story_act_id: int
-
-
-@strawberry.type
-class PlayerNewDialogueOptionsEvent:
-    options: typing.List[str]
-
-
-@strawberry.type
-class CharacterDialogueEvent:
-    character_id: int
-    messages: typing.List[str]
-
-
-@strawberry.type
-class PlayerPhotoTaskEvent:
-    requirements: typing.List[str]
-
-
-GameSessionEvent = typing.Union[
-    CharacterDialogueEvent,
-    PlayerPhotoTaskEvent,
-    PlayerNewDialogueOptionsEvent,
-    NewStoryActEvent,
-    WritingNewStoryActEvent,
-    ShowVideoEvent,
-    ShowStoryPrologueEvent,
-    SubmitPhotoEvent,
-]
+        return GameStoryBlock(
+            id=block.id,
+            number=block.number,
+            is_final_act=block.is_final_act,
+            dialogue=block.dialogue,
+            actions_consumed=block.actions_consumed,
+            backdrop_image_url=block.backdrop_image_url,
+            possible_actions=block.possible_actions,
+            previous_action=previous_action,
+        )
 
 
 @strawberry.type
 class Character:
     id: int
     name: str
+    background: str
     profile_photo_url: str
 
     @staticmethod
@@ -79,16 +66,44 @@ class Character:
         return Character(
             id=character.id,
             name=character.name,
+            background=character.background,
             profile_photo_url=character.profile_image_url,
         )
 
 
 @strawberry.type
 class GameSession:
-    session_key: str
+    id: str
     title: str
-    events: typing.List[GameSessionEvent]
+    themes: typing.List[str]
+    synopsis: str
+    prologue: typing.List[str]
     characters: typing.List[Character]
+    story_blocks: typing.List[GameStoryBlock]
+    promo_image_url: str
+    opening_video_url: str
+    final_video_url: typing.Optional[str]
+    total_actions: int
+
+    def from_data(game_session: appmodels.GameSession):
+        return GameSession(
+            id=game_session.id,
+            title=game_session.title,
+            themes=game_session.themes,
+            synopsis=game_session.synopsis,
+            prologue=game_session.prologue,
+            promo_image_url=game_session.promo_image_url,
+            characters=list(
+                map(
+                    Character.from_data,
+                    game_session.characters,
+                )
+            ),
+            story_blocks=list(map(GameStoryBlock.from_data, game_session.story_blocks)),
+            opening_video_url=game_session.opening_video_url,
+            total_actions=game_session.total_actions,
+            final_video_url=game_session.final_video_url,
+        )
 
 
 @strawberry.type
@@ -168,57 +183,26 @@ class LumaGenerations:
 @strawberry.type
 class Query:
     @strawberry.field
-    def current_session(session_key: str) -> typing.Optional[GameSession]:
+    def available_games() -> typing.List[GameSession]:
+        with Session(connection) as session:
+            statement = sqlalchemy.select(appmodels.GameSession).limit(100)
+
+            game_sessions = session.scalars(statement).all()
+
+            return list(map(GameSession.from_data, game_sessions))
+
+    @strawberry.field
+    def game(id: str) -> typing.Optional[GameSession]:
         with Session(connection) as session:
             statement = (
                 sqlalchemy.select(appmodels.GameSession)
-                .where(appmodels.GameSession.id == session_key)
+                .where(appmodels.GameSession.id == id)
                 .limit(1)
             )
 
             game_session = session.scalars(statement).one()
 
-            def serialize_event(ev: appmodels.GameSessionEvent):
-                match ev.type:
-                    case "character":
-                        return CharacterDialogueEvent(
-                            character_id=ev.character_id, messages=ev.messages
-                        )
-
-                    case "new-act":
-                        return NewStoryActEvent(story_act_id=ev.story_act_id)
-
-                    case "player-options":
-                        return PlayerNewDialogueOptionsEvent(options=ev.options)
-
-                    case "player-photo-task":
-                        return PlayerPhotoTaskEvent(requirements=ev.requirements)
-
-                    case "writing-next-act":
-                        return WritingNewStoryActEvent(status=True)
-
-                    case "video":
-                        return ShowVideoEvent(video_url=ev.video_url)
-
-                    case "story-prologue":
-                        return ShowStoryPrologueEvent(lines=ev.lines)
-
-                    case "submit-photo":
-                        return SubmitPhotoEvent(photo_url=ev.photo_url)
-
-            return GameSession(
-                session_key=game_session.id,
-                title=game_session.title,
-                events=list(map(serialize_event, game_session.events)),
-                characters=list(
-                    map(
-                        Character.from_data,
-                        game_session.characters,
-                    )
-                ),
-            )
-
-        return None
+            return GameSession.from_data(game_session)
 
     @strawberry.field
     async def debug_list_generations(page: int, per_page: int) -> LumaGenerations:
@@ -296,17 +280,17 @@ class CommandType(Enum):
 @strawberry.type
 class Mutation:
     @strawberry.mutation
-    def reset(self, session_key: str) -> str:
+    def reset(self, id: str) -> str:
         with Session(connection) as session:
             statement = (
                 sqlalchemy.select(appmodels.GameSession)
-                .where(appmodels.GameSession.id == session_key)
+                .where(appmodels.GameSession.id == id)
                 .limit(1)
             )
             game_session = session.scalars(statement).one()
-            game_session.raw_events = "[]"
-            del_statement = sqlalchemy.delete(appmodels.GameStoryAct).where(
-                appmodels.GameStoryAct.session_id == session_key
+            game_session.story_blocks = []
+            del_statement = sqlalchemy.delete(appmodels.GameStoryBlock).where(
+                appmodels.GameStoryBlock.session_id == id
             )
             session.execute(del_statement)
             session.add_all([game_session])
@@ -353,12 +337,16 @@ async def websocket_endpoint(websocket: WebSocket, key: str | None = None):
         data = await websocket.receive_json()
 
         match data["type"]:
-            case "start":
+            case "start-game":
                 asyncio.create_task(start_game_session(key, websocket))
                 continue
 
             case "submit-photo":
-                asyncio.create_task(submit_photo(key, websocket, data["photo_url"]))
+                asyncio.create_task(submit_photo(key, websocket, data["url"]))
+                continue
+
+            case "take-action":
+                asyncio.create_task(submit_action(key, websocket, data["action"]))
                 continue
 
             case _:
@@ -367,48 +355,29 @@ async def websocket_endpoint(websocket: WebSocket, key: str | None = None):
 
 
 async def start_game_session(key: str, ws: WebSocket):
-    with Session(connection) as session:
-        statement = (
-            sqlalchemy.select(appmodels.GameSession)
-            .where(appmodels.GameSession.id == key)
-            .limit(1)
-        )
-        game_session = session.scalars(statement).one()
+    await _generic_action(key, ws, "", "")
 
-        if len(game_session.events) > 0:
-            logger.debug("skipping start game session - writing already in progress")
-            await ws.send_json({"type": "error", "message": "writing in progress"})
-            return
 
-        game_session.write_events(
-            game_session.events + game_session.load_writing_event()
-        )
-
-        session.add_all([game_session])
-        session.commit()
-
-        await ws.send_json({"type": "updated"})
-
-        next_act = await generate_game_story_act(
-            game_session=game_session, previous_acts=[]
-        )
-
-        game_session = session.scalars(statement).one()
-        game_session.acts.append(next_act)
-
-        session.add_all([game_session])
-        session.commit()
-
-        new_events = game_session.load_prephoto_events(next_act)
-        game_session.write_events(game_session.events + new_events)
-
-        session.add_all([game_session])
-        session.commit()
-
-        await ws.send_json({"type": "updated"})
+async def submit_action(key: str, ws: WebSocket, action: str):
+    await _generic_action(key, ws, action, "")
 
 
 async def submit_photo(key: str, ws: WebSocket, photo_url: str):
+    await _generic_action(key, ws, "", photo_url)
+
+
+async def _generic_action(key: str, ws: WebSocket, action: str, photo_url: str):
+    try:
+        await _generic_action_inner(key, ws, action, photo_url)
+    except Exception as e:
+        logger.error(e)
+        await ws.send_json({"type": "error", "message": "something went wrong"})
+
+
+async def _generic_action_inner(key: str, ws: WebSocket, action: str, photo_url: str):
+    print("ATTEMPT")
+    print(action)
+    print(photo_url)
     with Session(connection) as session:
         statement = (
             sqlalchemy.select(appmodels.GameSession)
@@ -417,52 +386,175 @@ async def submit_photo(key: str, ws: WebSocket, photo_url: str):
         )
         game_session = session.scalars(statement).one()
 
-        if (
-            len(game_session.events) > 0
-            and game_session.events[-1].type != "player-photo-task"
-        ):
-            logger.debug("submitted photo when it wasn't expected")
-            await ws.send_json({"type": "error", "message": "invalid operation"})
+        if action == "" and photo_url == "" and len(game_session.story_blocks) > 0:
+            logger.debug("skipping start game session - game already started")
+            await ws.send_json({"type": "error", "message": "game already started"})
             return
 
-        statement2 = (
-            sqlalchemy.select(appmodels.GameStoryAct)
-            .where(
-                appmodels.GameStoryAct.session_id == key
-                and appmodels.GameStoryAct.next_act_id == None
-            )
-            .limit(1)
-        )
-        previous_act = session.scalars(statement2).one()
+        await ws.send_json({"type": "updated"})
 
-        game_session.write_events(
-            game_session.events
-            + game_session.load_postphoto_events(previous_act, photo_url=photo_url)
-            + game_session.load_writing_event()
+        action_obj = TextAction(text="")
+        if action != "":
+            action_obj = TextAction(text=action)
+        elif photo_url != "":
+            action_obj = PhotoAction(url=photo_url)
+
+        next_block = await generate_next_story_block(
+            game_session=game_session, action=action_obj
         )
+
+        game_session = session.scalars(statement).one()
+        game_session.story_blocks.append(next_block)
 
         session.add_all([game_session])
         session.commit()
 
         await ws.send_json({"type": "updated"})
 
-        game_session = session.scalars(statement).one()
+        await _update_photo(session, ws, game_session, next_block)
 
-        next_act = await generate_game_story_act(
-            game_session=game_session, previous_acts=[previous_act]
+
+async def _update_photo(
+    session: Session,
+    ws: WebSocket,
+    game: appmodels.GameSession,
+    story_block: appmodels.GameStoryBlock,
+):
+    if Config.stub_image_generation:
+        logger.debug("stub image - performing artificial wait")
+        await asyncio.sleep(3)
+        story_block.backdrop_image_url = (
+            f"https://placehold.co/400?text={quote("backdrop image URL")}"
         )
-        game_session.acts.append(next_act)
+        logger.debug("stub image - DONE")
+    else:
+        generation = await luma_client.generations.image.create(
+            prompt=f"""
+Using the visual styles: {game.visual_style}
 
-        session.add_all([game_session])
-        session.commit()
+Without including any text in the art, generate artwork for a novel inspired by the following dialogue:
 
-        game_session = session.scalars(statement).one()
-        previous_act.next_act_id = next_act.id
-        game_session.write_events(
-            game_session.events + game_session.load_prephoto_events(next_act)
+{"\n- ".join(story_block.dialogue)}
+""",
+            aspect_ratio="3:4",
+        )
+        completed = False
+        while not completed:
+            logger.debug("checking video")
+            gen = await luma_client.generations.get(id=generation.id)
+            if gen.state == "completed":
+                logger.debug("image ready")
+                completed = True
+                story_block.backdrop_image_url = gen.assets.image
+            elif gen.state == "failed":
+                raise RuntimeError(f"Generation failed: {gen.failure_reason}")
+            await asyncio.sleep(2)
+
+    session.add_all([story_block])
+    session.commit()
+
+    await ws.send_json({"type": "updated"})
+
+    if story_block.is_final_act:
+        await _create_final_video(session, ws, game)
+
+
+async def _create_final_video(
+    session: Session,
+    ws: WebSocket,
+    game: appmodels.GameSession,
+):
+    blocks = sorted(game.story_blocks, key=lambda b: b.number)
+
+    story_block_chain = (
+        ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """
+{base_character}
+
+You will be provided with a synopsis for a short story, along with the reference
+material that influences the story. Use the synopsis to generate a video, and
+use the reference material to generate the video background, mood and setting.
+
+From this information, describe a video scene that would be suitable as a
+trailer for the short story in detail, going into detail on how the scene is
+laid out, who is in the foreground and the camera movements or scene
+transitions.
+
+Keep this description succinct and no longer than 1 paragraph.
+""",
+                ),
+                (
+                    "human",
+                    """
+## Reference Material
+{reference_material}
+
+## Synopsis
+{synopsis}
+
+## Story Events
+{story_events}
+""",
+                ),
+            ]
+        )
+        | llm
+    )
+
+    previous_generation = None
+    video_url = ""
+    for block in blocks:
+        keyframes = {}
+        if previous_generation is not None:
+            keyframes["frame0"] = {
+                "type": "generation",
+                "id": previous_generation.id,
+            }
+
+        story_block_response = await story_block_chain.ainvoke(
+            {
+                "base_character": "You are a helpful video director",
+                "synopsis": game.synopsis,
+                "reference_material": game.reference_material_summary,
+                "story_events": "\n- ".join(block.dialogue),
+            }
         )
 
-        session.add_all([game_session, previous_act])
-        session.commit()
+        print(f"generating final video, frame {block.number} of {game.total_actions}")
+        print(story_block_response.content)
+        generation = await luma_client.generations.create(
+            model="ray-flash-2",
+            prompt=f"""
+Using the visual style: {game.visual_style}
 
-        await ws.send_json({"type": "updated"})
+Generate a video using the following description:
+{story_block_response.content}
+""",
+        )
+
+        completed = False
+        while not completed:
+            print(f"checking video {block.number} of {game.total_actions}")
+            gen = await luma_client.generations.get(id=generation.id)
+            if gen.state == "completed":
+                print("end video gen")
+                video_url = gen.assets.video
+                break
+            elif gen.state == "failed":
+                raise RuntimeError(f"Generation failed: {gen.failure_reason}")
+
+            await asyncio.sleep(3)
+
+        previous_generation = generation
+
+    game.final_video_url = video_url
+
+    session.add_all([game])
+    session.commit()
+
+    print("video done")
+
+    await ws.send_json({"type": "updated"})

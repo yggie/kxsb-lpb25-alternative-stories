@@ -1,9 +1,8 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { useGameSession, type GameSession } from "../page";
 import { FilesetResolver, ImageClassifier } from "@mediapipe/tasks-vision";
 import clsx from "clsx";
-import { GiRadarSweep } from "react-icons/gi";
 import { useToast } from "@/ui/overlays/toast";
+import { AiFillCloseCircle, AiTwotoneCamera } from "react-icons/ai";
 
 const classifierPromise: Promise<ImageClassifier> =
   typeof window === "undefined"
@@ -19,18 +18,18 @@ const classifierPromise: Promise<ImageClassifier> =
         }),
       );
 
-export function PhotoTaskOverlay({
-  event,
+export function MagicCameraOverlay({
+  open,
+  onClose,
+  onImageReady,
 }: {
-  event: Extract<
-    GameSession["events"][0],
-    { __typename?: "PlayerPhotoTaskEvent" }
-  >;
+  open: boolean;
+  onClose: () => void;
+  onImageReady: (url: string) => void;
 }) {
   const classifier = use(classifierPromise);
   const { showToast } = useToast();
 
-  const { onProgressTimelineIntent } = useGameSession();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -166,18 +165,19 @@ export function PhotoTaskOverlay({
                 ev.stopPropagation();
 
                 if (canvasRef.current) {
-                  canvasRef.current.toBlob(
-                    (blob) => {
-                      if (blob) {
-                        onProgressTimelineIntent(event, {
-                          type: "submit-photo",
-                          file: new File([blob], "submission.jpg"),
-                        });
-                      }
-                    },
-                    "image/jpeg",
-                    0.95,
-                  );
+                  onImageReady(canvasRef.current.toDataURL() || "");
+                  // canvasRef.current.toBlob(
+                  //   (blob) => {
+                  //     if (blob) {
+                  //       // onProgressTimelineIntent(event, {
+                  //       //   type: "submit-photo",
+                  //       //   file: new File([blob], "submission.jpg"),
+                  //       // });
+                  //     }
+                  //   },
+                  //   "image/jpeg",
+                  //   0.95,
+                  // );
                 } else {
                   setPreviewImage("");
                 }
@@ -197,7 +197,18 @@ export function PhotoTaskOverlay({
             }}
             className="btn btn-circle btn-primary btn-xl absolute bottom-4 left-1/2 -translate-x-1/2"
           >
-            <GiRadarSweep size="1.6em" />
+            <AiTwotoneCamera size="1.6em" />
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-circle btn-primary absolute top-4 right-4"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onClose();
+            }}
+          >
+            <AiFillCloseCircle size="1.4em" />
           </button>
         </>
       )}
