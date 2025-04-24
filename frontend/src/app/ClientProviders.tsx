@@ -7,7 +7,7 @@ import React from "react";
 import { Suspense, type ReactNode } from "react";
 
 const client = new ApolloClient({
-  uri: "http://localhost:8000/graphql",
+  uri: `${process.env.NEXT_PUBLIC_API_URL}/graphql`,
   cache: new InMemoryCache(),
 });
 

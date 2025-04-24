@@ -1,4 +1,4 @@
-import time
+import os
 import asyncio
 import typing
 import strawberry
@@ -312,7 +312,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[os.environ["ALLOWED_ORIGIN"]],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -427,7 +427,7 @@ async def _update_photo(
         logger.debug("stub image - performing artificial wait")
         await asyncio.sleep(3)
         story_block.backdrop_image_url = (
-            f"https://placehold.co/400?text={quote("backdrop image URL")}"
+            f"https://placehold.co/400?text={quote('backdrop image URL')}"
         )
         logger.debug("stub image - DONE")
     else:
@@ -437,7 +437,7 @@ Using the visual styles: {game.visual_style}
 
 Without including any text in the art, generate artwork for a novel inspired by the following dialogue:
 
-{"\n- ".join(story_block.dialogue)}
+{'\n- '.join(story_block.dialogue)}
 """,
             aspect_ratio="3:4",
         )

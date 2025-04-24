@@ -61,10 +61,7 @@ export default function Home() {
 
             <div className="w-full max-w-md p-4 bg-slate-800/30 absolute bottom-0 left-1/2 -translate-x-1/2 rounded-t-lg">
               <h2 className="text-3xl">
-                <Link
-                  href={`/session/${game.id}`}
-                  className="link link-primary"
-                >
+                <Link href={`/session/${game.id}`} className="link">
                   {game.title}
                 </Link>
               </h2>

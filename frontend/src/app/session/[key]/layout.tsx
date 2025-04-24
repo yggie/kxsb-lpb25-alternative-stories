@@ -19,19 +19,18 @@ export default function SessionLayout({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      {process.env.NEXT_PUBLIC_DEBUG ? (
-        <button
-          type="button"
-          className="fixed top-4 left-4 btn btn-warning z-50"
-          onClick={() => {
-            reset({ variables: { id: key } }).then(() =>
-              window.location.reload(),
-            );
-          }}
-        >
-          Reset
-        </button>
-      ) : null}
+
+      <button
+        type="button"
+        className="fixed top-4 left-4 btn btn-warning z-50"
+        onClick={() => {
+          reset({ variables: { id: key } }).then(() =>
+            window.location.reload(),
+          );
+        }}
+      >
+        Reset Progress
+      </button>
     </>
   );
 }
