@@ -1,13 +1,14 @@
 import sqlalchemy
+from app.config import Config
 
 engine = sqlalchemy.create_engine(
     sqlalchemy.engine.URL(
         drivername="postgresql",
-        username="postgres",
-        password="example",
-        port=5432,
-        host="localhost",
-        database="postgres",
+        username=Config.db_username,
+        password=Config.db_password,
+        port=Config.db_port,
+        host=Config.db_host,
+        database=Config.db_database,
         query={},
     )
 )

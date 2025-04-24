@@ -33,7 +33,9 @@ export default function Home() {
   );
 
   return (
-    <main className="h-screen w-screen flex flex-col items-center">
+    <main className="h-screen w-screen flex flex-col items-center p-8">
+      <h1 className="my-8 text-3xl">Alternative Stories</h1>
+
       <section>
         <h2>
           <Link href="/" className="link text-2xl">
@@ -41,7 +43,15 @@ export default function Home() {
           </Link>
         </h2>
 
-        <p className="text-lg mt-4">Some explanation about how it works</p>
+        <ol className="list list-decimal text-lg mt-4">
+          <li>Click any of the following experience</li>
+          <li>Start the experience</li>
+          <li>
+            During dialogue actions, you can either pick one of the pre-defined
+            options or take a photo
+          </li>
+          <li>Repeat until you run out of turns and reach an ending</li>
+        </ol>
       </section>
 
       <ul className="flex flex-col gap-8 items-center w-full max-w-3xl overflow-y-auto h-full">

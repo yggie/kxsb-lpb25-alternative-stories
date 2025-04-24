@@ -8,7 +8,6 @@ import app.models
 from urllib.parse import quote
 from app.gamemaster.llms import GAMEMASTER_BASE_CHARACTER
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_mistralai import ChatMistralAI
 from app.config import Config
 from app.luma import luma_client
@@ -104,7 +103,7 @@ characters.append(
 game_session = app.models.GameSession()
 game_session.visual_style = random.choice(
     [
-        # "hyper-realism",
+        "hyper-realism",
         "comics, halftone",
         "egyptian, mythology, greek",
         "animation, cartoon",
