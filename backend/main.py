@@ -206,6 +206,9 @@ class Query:
 
     @strawberry.field
     async def debug_list_generations(page: int, per_page: int) -> LumaGenerations:
+        if not Config.debug:
+            raise Exception("not available")
+
         generation = await luma_client.generations.list(
             limit=per_page, offset=(per_page * (page - 1))
         )
